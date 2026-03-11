@@ -190,6 +190,15 @@ func (bs *BYOCGatewayServer) withCORS(statusCode int) http.Handler {
 	})
 }
 
+// AutoLoader is the interface for on-demand container management.
+// When set on BYOCOrchestratorServer, stream requests will auto-start
+// containers for models that aren't already running.
+type AutoLoader interface {
+	EnsureRunning(ctx context.Context, modelID string) (endpoint string, err error)
+	Release(modelID string)
+	IsRunning(modelID string) bool
+}
+
 type BYOCOrchestratorServer struct {
 	node            *core.LivepeerNode
 	orch            Orchestrator
@@ -199,6 +208,10 @@ type BYOCOrchestratorServer struct {
 	httpMux *http.ServeMux
 
 	sharedBalMtx *sync.Mutex
+
+	// autoloader enables on-demand container start for stream requests.
+	// When nil, containers must be pre-registered via /capability/register.
+	autoloader AutoLoader
 }
 
 func NewBYOCOrchestratorServer(node *core.LivepeerNode, orch Orchestrator, trickleSrv *trickle.Server, trickleBasePath string, mux *http.ServeMux) *BYOCOrchestratorServer {
@@ -217,6 +230,11 @@ func NewBYOCOrchestratorServer(node *core.LivepeerNode, orch Orchestrator, trick
 
 func (bso *BYOCOrchestratorServer) Node() *core.LivepeerNode {
 	return bso.node
+}
+
+// SetAutoLoader configures the autoloader for on-demand container management.
+func (bso *BYOCOrchestratorServer) SetAutoLoader(al AutoLoader) {
+	bso.autoloader = al
 }
 func (bso *BYOCOrchestratorServer) SharedBalanceLock() *sync.Mutex {
 	return bso.sharedBalMtx

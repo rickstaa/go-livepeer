@@ -36,6 +36,22 @@ func (bso *BYOCOrchestratorServer) StartStream() http.Handler {
 		}
 		ctx = clog.AddVal(ctx, "stream_id", orchJob.Req.ID)
 
+		// Auto-load container if capability URL is empty and autoloader is configured.
+		// This bridges the @pipeline decorator world (ai-runner) with orchestrator discovery:
+		// the modelID from the request maps to a container manifest, which the autoloader
+		// starts on a compatible GPU, then registers as an external capability.
+		if orchJob.Req.CapabilityUrl == "" && bso.autoloader != nil {
+			clog.Infof(ctx, "No container registered for capability %s, attempting autoload", orchJob.Req.Capability)
+			endpoint, autoErr := bso.autoloader.EnsureRunning(ctx, orchJob.Req.Capability)
+			if autoErr != nil {
+				bso.orch.FreeExternalCapabilityCapacity(orchJob.Req.Capability)
+				clog.Errorf(ctx, "Autoload failed for %s: %v", orchJob.Req.Capability, autoErr)
+				respondWithError(w, fmt.Sprintf("autoload failed: %v", autoErr), http.StatusServiceUnavailable)
+				return
+			}
+			orchJob.Req.CapabilityUrl = endpoint
+		}
+
 		workerRoute := orchJob.Req.CapabilityUrl + "/stream/start"
 
 		// Read the original body
@@ -239,6 +255,11 @@ func (bso *BYOCOrchestratorServer) monitorOrchStream(job *orchJob) {
 		select {
 		case <-stream.StreamCtx.Done():
 			bso.orch.FreeExternalCapabilityCapacity(capability)
+			// Notify autoloader that this stream is done, so it can start
+			// the idle timeout countdown for the container.
+			if bso.autoloader != nil {
+				bso.autoloader.Release(capability)
+			}
 			clog.Infof(ctx, "Stream ended, stopping payment monitoring and released capacity")
 			return
 		case <-pmtTicker.C:
