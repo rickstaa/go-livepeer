@@ -237,20 +237,6 @@ func (bso *BYOCOrchestratorServer) processJob(ctx context.Context, w http.Respon
 	ctx = clog.AddVal(ctx, "worker_task_id", string(taskId))
 	ctx = clog.AddVal(ctx, "capability", orchJob.Req.Capability)
 	ctx = clog.AddVal(ctx, "sender", orchJob.Req.Sender)
-
-	// Auto-load container if capability URL is empty and autoloader is configured.
-	if orchJob.Req.CapabilityUrl == "" && bso.autoloader != nil {
-		clog.Infof(ctx, "No container for capability %s, attempting autoload", orchJob.Req.Capability)
-		endpoint, autoErr := bso.autoloader.EnsureRunning(ctx, orchJob.Req.Capability)
-		if autoErr != nil {
-			bso.orch.FreeExternalCapabilityCapacity(orchJob.Req.Capability)
-			clog.Errorf(ctx, "Autoload failed for %s: %v", orchJob.Req.Capability, autoErr)
-			http.Error(w, fmt.Sprintf("autoload failed: %v", autoErr), http.StatusServiceUnavailable)
-			return
-		}
-		orchJob.Req.CapabilityUrl = endpoint
-	}
-
 	clog.V(common.SHORT).Infof(ctx, "Received job, sending for processing")
 
 	// Read the original body
